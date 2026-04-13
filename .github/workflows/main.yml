@@ -1,0 +1,12 @@
+name: Ninja Van CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: |
+          pip install ortools pytest streamlit fastapi
+      - name: Run logic tests
+        run: pytest tests/test_optimizer.py

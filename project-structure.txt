@@ -1,0 +1,7 @@
+ninjaroute-ai/
+├── src/
+│   ├── solver.py         # Core Optimization Logic (OR-Tools)
+│   └── dashboard.py      # Streamlit Control Tower UI
+├── data/                 # Sample Geo-spatial datasets
+├── requirements.txt      # Project Dependencies
+└── README.md             # Technical Documentation
