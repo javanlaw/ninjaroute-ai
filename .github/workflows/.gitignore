@@ -1,18 +1,22 @@
-# Python bytecode
+# Python
 __pycache__/
 *.py[cod]
-
-# Virtual Environments
-venv/
+*$py.class
+.venv/
 env/
+venv/
+
+# Streamlit
+.streamlit/
+static/
+
+# Environment/Secrets
 .env
 
-# Streamlit specific
-.streamlit/
+# Large Data (Keep your repo light)
+data/*.csv
+data/*.json
 
-# OS generated files
+# OS specific
 .DS_Store
 Thumbs.db
-
-# Local Data (optional - if you have large CSVs you don't want to push)
-data/*.csv
