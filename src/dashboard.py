@@ -1,14 +1,21 @@
 import streamlit as st
 import random
 import pandas as pd
-import pandas as pd
 import plotly.express as px
 
-
-# 1. Define the dynamic function
+# 1. Define the dynamic function with Singapore Localization
 def get_optimized_data(vans, capacity, total_parcels):
     if (vans * capacity) < total_parcels:
         return []
+
+    # Localized Singapore Clusters
+    sg_zones = [
+        "North-East (Punggol/Sengkang)", 
+        "West (Jurong/Clementi)", 
+        "Central (CBD/Orchard)", 
+        "East (Tampines/Changi)", 
+        "North (Woodlands/Yishun)"
+    ]
 
     results = []
     remaining_parcels = total_parcels
@@ -32,7 +39,7 @@ def get_optimized_data(vans, capacity, total_parcels):
         hour = 8 + (total_minutes_after_8 // 60)
         minutes = total_minutes_after_8 % 60
 
-        # STATUS LOGIC: Check if this specific van is at high risk
+        # STATUS LOGIC: High-Risk Detection
         van_utilization = van_load / capacity
         if van_utilization > 0.95:
             van_status = "⚠️ Potential Delay"
@@ -41,7 +48,7 @@ def get_optimized_data(vans, capacity, total_parcels):
 
         results.append({
             "Van": f"Ninja Van {i + 1}",
-            "Stop": f"Zone {chr(65 + i)} Cluster",
+            "Stop": sg_zones[i % len(sg_zones)], # <--- INCORPORATED SG ZONES HERE
             "Arrival": f"{hour}:{minutes:02d} AM", 
             "Load": f"{van_load}/{capacity}",
             "Status": van_status
@@ -51,7 +58,7 @@ def get_optimized_data(vans, capacity, total_parcels):
 
 # 2. Streamlit UI Layout
 st.set_page_config(page_title="Ninja Van Optimizer", layout="wide")
-st.title("🚚 Ninja Van: AI Route Dispatcher")
+st.title("🚚 NinjaRoute AI: Singapore Dispatcher")
 
 with st.sidebar:
     st.header("Fleet Controls")
@@ -61,7 +68,6 @@ with st.sidebar:
     st.button("Re-Optimize Fleet")
 
 # 3. Execution Logic
-# FIX: Added total_parcels to the function call
 route_data = get_optimized_data(num_vans, max_load, total_parcels)
 
 if not route_data:
@@ -70,25 +76,26 @@ else:
     df = pd.DataFrame(route_data)
     df['Load_Numeric'] = df['Load'].apply(lambda x: int(x.split('/')[0]))
 
-    # 4. Global SLA Logic (for the Metric Box)
+    # 4. Global SLA Logic
     fleet_utilization = total_parcels / (num_vans * max_load)
     if fleet_utilization > 0.95:
         sla_val, sla_delta = "92%", "-8% (High Risk)"
     else:
         sla_val, sla_delta = "100%", "Stable"
 
-    # 5. Metrics Row
+    # 5. Metrics Row (Adjusted for Singapore Distances)
     col1, col2, col3 = st.columns(3)
-    estimated_dist = f"{3000 + (total_parcels * 10):,.0f} m"
-    col1.metric("Total Distance", estimated_dist, "Optimized")
+    # Estimate based on SG island dimensions
+    estimated_dist = f"{15 + (num_vans * 10)} km" 
+    col1.metric("Total Fleet Distance", estimated_dist, "Optimized")
     col2.metric("Total Parcels", f"{total_parcels} Units") 
     col3.metric("SLA Compliance", sla_val, sla_delta)
 
     # 6. Table & Visuals
-    st.subheader("Optimized Delivery Schedule")
+    st.subheader("📍 Singapore Cluster Dispatch Schedule")
     st.table(df.drop(columns=['Load_Numeric']))
 
-    st.subheader("Vehicle Load Analysis")
+    st.subheader("📊 Vehicle Load Analysis")
     fig = px.bar(
         df, x="Van", y="Load_Numeric", color="Van", text="Load", 
         title=f"Fleet Load Distribution (Cap: {max_load})",
