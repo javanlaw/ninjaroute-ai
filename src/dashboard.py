@@ -3,12 +3,11 @@ import random
 import pandas as pd
 import plotly.express as px
 
-# 1. Define the dynamic function with Singapore Localization
+# --- 1. CORE ENGINE ---
 def get_optimized_data(vans, capacity, total_parcels):
     if (vans * capacity) < total_parcels:
         return []
 
-    # Localized Singapore Clusters
     sg_zones = [
         "North-East (Punggol/Sengkang)", 
         "West (Jurong/Clementi)", 
@@ -21,7 +20,6 @@ def get_optimized_data(vans, capacity, total_parcels):
     remaining_parcels = total_parcels
     
     for i in range(vans):
-        # Calculate Load distribution
         if i == vans - 1:
             van_load = remaining_parcels
         else:
@@ -31,7 +29,6 @@ def get_optimized_data(vans, capacity, total_parcels):
             
         remaining_parcels -= van_load
         
-        # TIME LOGIC: 2 mins per parcel + 30 min zone offset
         service_minutes = van_load * 2  
         travel_offset = i * 30 
         total_minutes_after_8 = travel_offset + service_minutes
@@ -39,67 +36,98 @@ def get_optimized_data(vans, capacity, total_parcels):
         hour = 8 + (total_minutes_after_8 // 60)
         minutes = total_minutes_after_8 % 60
 
-        # STATUS LOGIC: High-Risk Detection
-        van_utilization = van_load / capacity
-        if van_utilization > 0.95:
-            van_status = "⚠️ Potential Delay"
-        else:
-            van_status = "✅ On Time"
+        utilization = van_load / capacity
+        status = "⚠️ Potential Delay" if utilization > 0.95 else "✅ On Time"
 
         results.append({
             "Van": f"Ninja Van {i + 1}",
-            "Stop": sg_zones[i % len(sg_zones)], # <--- INCORPORATED SG ZONES HERE
+            "Stop": sg_zones[i % len(sg_zones)],
             "Arrival": f"{hour}:{minutes:02d} AM", 
-            "Load": f"{van_load}/{capacity}",
-            "Status": van_status
+            "Load_Raw": van_load,
+            "Capacity": capacity,
+            "Status": status
         })
-        
     return results
 
-# 2. Streamlit UI Layout
+# --- 2. UI LAYOUT ---
 st.set_page_config(page_title="Ninja Van Optimizer", layout="wide")
 st.title("🚚 NinjaRoute AI: Singapore Dispatcher")
 
 with st.sidebar:
+    st.header("📂 Data Integration")
+    uploaded_file = st.file_uploader("Upload Delivery Dataset (CSV)", type=["csv"])
+    
+    st.divider()
     st.header("Fleet Controls")
-    num_vans = st.slider("Active Vans", 1, 5, 2)
+    num_vans = st.slider("Active Vans", 1, 10, 3)
     max_load = st.number_input("Max Parcels per Van", value=50)
-    total_parcels = st.slider("Total Parcels to Deliver", 10, 200, 60) 
-    st.button("Re-Optimize Fleet")
+    total_parcels = st.slider("Total Volume", 10, 500, 120)
+    st.button("🔄 Re-Optimize Fleet", use_container_width=True)
 
-# 3. Execution Logic
-route_data = get_optimized_data(num_vans, max_load, total_parcels)
-
-if not route_data:
-    st.error(f"❌ Infeasible: {num_vans} van(s) cannot carry {total_parcels} parcels with a {max_load} limit.")
+# --- 3. EXECUTION LOGIC ---
+if uploaded_file is not None:
+    df_raw = pd.read_csv(uploaded_file)
+    df = df_raw.copy()
+    df['Load_Raw'] = df['Load']
+    df['Utilization'] = df['Load'] / df['Capacity']
+    df['Status'] = df['Utilization'].apply(lambda x: "⚠️ Potential Delay" if x > 0.95 else "✅ On Time")
+    df['Load_Display'] = df['Load'].astype(str) + "/" + df['Capacity'].astype(str)
+    display_df = df[['Van', 'Stop', 'Load_Display', 'Status']].rename(columns={"Load_Display": "Load"})
+    plot_df = df
 else:
+    route_data = get_optimized_data(num_vans, max_load, total_parcels)
+    if not route_data:
+        st.error(f"❌ Infeasible: Capacity exceeded.")
+        st.stop()
     df = pd.DataFrame(route_data)
-    df['Load_Numeric'] = df['Load'].apply(lambda x: int(x.split('/')[0]))
+    df['Load'] = df['Load_Raw'].astype(str) + "/" + df['Capacity'].astype(str)
+    display_df = df[['Van', 'Stop', 'Arrival', 'Load', 'Status']]
+    plot_df = df
 
-    # 4. Global SLA Logic
-    fleet_utilization = total_parcels / (num_vans * max_load)
-    if fleet_utilization > 0.95:
-        sla_val, sla_delta = "92%", "-8% (High Risk)"
-    else:
-        sla_val, sla_delta = "100%", "Stable"
+# --- 4. ENHANCED METRICS & SLA PERCENTAGE ---
+actual_load = int(plot_df['Load_Raw'].sum())
+fleet_capacity = len(plot_df) * max_load
+utilization_pct = (actual_load / fleet_capacity) * 100
 
-    # 5. Metrics Row (Adjusted for Singapore Distances)
-    col1, col2, col3 = st.columns(3)
-    # Estimate based on SG island dimensions
-    estimated_dist = f"{15 + (num_vans * 10)} km" 
-    col1.metric("Total Fleet Distance", estimated_dist, "Optimized")
-    col2.metric("Total Parcels", f"{total_parcels} Units") 
-    col3.metric("SLA Compliance", sla_val, sla_delta)
+# SLA Percentage Calculation: 
+# We simulate a "target" utilization of 85%. 
+# If load goes over 95%, SLA drops significantly.
+if utilization_pct > 95:
+    sla_percentage = 100 - (utilization_pct - 85) * 2  # Drastic drop
+    sla_label = "⚠️ High Risk"
+    sla_color = "inverse"
+elif utilization_pct > 80:
+    sla_percentage = 98.5
+    sla_label = "⚡ Optimized"
+    sla_color = "normal"
+else:
+    sla_percentage = 100.0
+    sla_label = "✅ Stable"
+    sla_color = "normal"
 
-    # 6. Table & Visuals
-    st.subheader("📍 Singapore Cluster Dispatch Schedule")
-    st.table(df.drop(columns=['Load_Numeric']))
+col1, col2, col3 = st.columns(3)
 
-    st.subheader("📊 Vehicle Load Analysis")
-    fig = px.bar(
-        df, x="Van", y="Load_Numeric", color="Van", text="Load", 
-        title=f"Fleet Load Distribution (Cap: {max_load})",
-        labels={'Load_Numeric': 'Number of Parcels'},
-        template="plotly_white"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+col1.metric("Total Fleet Distance", f"{15 + (len(plot_df) * 10)} km", delta="Optimized", delta_color="normal")
+col2.metric("Total Dispatch Volume", f"{actual_load} Units")
+
+# Displaying SLA with the Percentage
+col3.metric(
+    label="SLA Compliance Score", 
+    value=f"{sla_percentage:.1f}%", 
+    delta=sla_label, 
+    delta_color=sla_color
+)
+
+# --- 5. TABLE & CHART ---
+st.subheader("📍 Singapore Cluster Dispatch Schedule")
+st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+st.subheader("📊 Vehicle Load Analysis")
+fig = px.bar(
+    plot_df, x="Van", y="Load_Raw", color="Status", text="Load_Raw",
+    title="Fleet Load Distribution",
+    labels={'Load_Raw': 'Parcels'},
+    color_discrete_map={"✅ On Time": "#2ecc71", "⚠️ Potential Delay": "#e74c3c"},
+    template="plotly_white"
+)
+st.plotly_chart(fig, use_container_width=True)
