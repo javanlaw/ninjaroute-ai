@@ -29,20 +29,32 @@ def get_optimized_data(vans, capacity, total_parcels):
             
         remaining_parcels -= van_load
         
+        # --- ROBUST TIME LOGIC ---
         service_minutes = van_load * 2  
         travel_offset = i * 30 
         total_minutes_after_8 = travel_offset + service_minutes
         
-        hour = 8 + (total_minutes_after_8 // 60)
-        minutes = total_minutes_after_8 % 60
+        # Shift start is 8:00 AM (480 minutes from midnight)
+        total_mins_from_midnight = 480 + total_minutes_after_8
+        
+        # Calculate 24h format first
+        hour_24, mins = divmod(total_mins_from_midnight, 60)
+        
+        # Convert to 12h format with AM/PM
+        period = "AM" if hour_24 < 12 else "PM"
+        hour_12 = hour_24 if hour_24 <= 12 else hour_24 - 12
+        if hour_12 == 0: hour_12 = 12  # Handles midnight/noon
+        
+        arrival_time = f"{hour_12}:{mins:02d} {period}"
 
+        # --- STATUS LOGIC ---
         utilization = van_load / capacity
         status = "⚠️ Potential Delay" if utilization > 0.95 else "✅ On Time"
 
         results.append({
             "Van": f"Ninja Van {i + 1}",
             "Stop": sg_zones[i % len(sg_zones)],
-            "Arrival": f"{hour}:{minutes:02d} AM", 
+            "Arrival": arrival_time, 
             "Load_Raw": van_load,
             "Capacity": capacity,
             "Status": status
@@ -89,11 +101,8 @@ actual_load = int(plot_df['Load_Raw'].sum())
 fleet_capacity = len(plot_df) * max_load
 utilization_pct = (actual_load / fleet_capacity) * 100
 
-# SLA Percentage Calculation: 
-# We simulate a "target" utilization of 85%. 
-# If load goes over 95%, SLA drops significantly.
 if utilization_pct > 95:
-    sla_percentage = 100 - (utilization_pct - 85) * 2  # Drastic drop
+    sla_percentage = 100 - (utilization_pct - 85) * 2
     sla_label = "⚠️ High Risk"
     sla_color = "inverse"
 elif utilization_pct > 80:
@@ -106,17 +115,9 @@ else:
     sla_color = "normal"
 
 col1, col2, col3 = st.columns(3)
-
 col1.metric("Total Fleet Distance", f"{15 + (len(plot_df) * 10)} km", delta="Optimized", delta_color="normal")
 col2.metric("Total Dispatch Volume", f"{actual_load} Units")
-
-# Displaying SLA with the Percentage
-col3.metric(
-    label="SLA Compliance Score", 
-    value=f"{sla_percentage:.1f}%", 
-    delta=sla_label, 
-    delta_color=sla_color
-)
+col3.metric(label="SLA Compliance Score", value=f"{sla_percentage:.1f}%", delta=sla_label, delta_color=sla_color)
 
 # --- 5. TABLE & CHART ---
 st.subheader("📍 Singapore Cluster Dispatch Schedule")
