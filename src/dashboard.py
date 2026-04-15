@@ -3,7 +3,22 @@ import random
 import pandas as pd
 import plotly.express as px
 
-# --- 1. CORE ENGINE ---
+# --- 1. HELPER FUNCTIONS ---
+
+def calculate_arrival_time(index, van_load):
+    """Calculates arrival time based on 8 AM start, 2 min/parcel, and 30 min travel offsets."""
+    service_minutes = van_load * 2  
+    travel_offset = index * 30 
+    total_minutes_after_8 = travel_offset + service_minutes
+    total_mins_from_midnight = 480 + total_minutes_after_8
+    
+    hour_24, mins = divmod(total_mins_from_midnight, 60)
+    period = "AM" if hour_24 < 12 else "PM"
+    hour_12 = hour_24 if hour_24 <= 12 else hour_24 - 12
+    if hour_12 == 0: hour_12 = 12
+    
+    return f"{hour_12}:{mins:02d} {period}"
+
 def get_optimized_data(vans, capacity, total_parcels):
     if (vans * capacity) < total_parcels:
         return []
@@ -29,35 +44,13 @@ def get_optimized_data(vans, capacity, total_parcels):
             
         remaining_parcels -= van_load
         
-        # --- ROBUST TIME LOGIC ---
-        service_minutes = van_load * 2  
-        travel_offset = i * 30 
-        total_minutes_after_8 = travel_offset + service_minutes
-        
-        # Shift start is 8:00 AM (480 minutes from midnight)
-        total_mins_from_midnight = 480 + total_minutes_after_8
-        
-        # Calculate 24h format first
-        hour_24, mins = divmod(total_mins_from_midnight, 60)
-        
-        # Convert to 12h format with AM/PM
-        period = "AM" if hour_24 < 12 else "PM"
-        hour_12 = hour_24 if hour_24 <= 12 else hour_24 - 12
-        if hour_12 == 0: hour_12 = 12  # Handles midnight/noon
-        
-        arrival_time = f"{hour_12}:{mins:02d} {period}"
-
-        # --- STATUS LOGIC ---
-        utilization = van_load / capacity
-        status = "⚠️ Potential Delay" if utilization > 0.95 else "✅ On Time"
-
         results.append({
             "Van": f"Ninja Van {i + 1}",
             "Stop": sg_zones[i % len(sg_zones)],
-            "Arrival": arrival_time, 
+            "Arrival": calculate_arrival_time(i, van_load), 
             "Load_Raw": van_load,
             "Capacity": capacity,
-            "Status": status
+            "Status": "⚠️ Potential Delay" if (van_load / capacity) > 0.95 else "✅ On Time"
         })
     return results
 
@@ -78,13 +71,26 @@ with st.sidebar:
 
 # --- 3. EXECUTION LOGIC ---
 if uploaded_file is not None:
-    df_raw = pd.read_csv(uploaded_file)
+    # Use 'utf-8-sig' to handle Excel's invisible characters
+    df_raw = pd.read_csv(uploaded_file, encoding='utf-8-sig')
+    
+    # CLEANING: Strip spaces and fix capitalization
+    df_raw.columns = df_raw.columns.str.strip().str.capitalize()
+    
+    if 'Load' not in df_raw.columns or 'Capacity' not in df_raw.columns:
+        st.error("❌ Column Mismatch: Please ensure CSV has 'Van', 'Stop', 'Load', and 'Capacity' headers.")
+        st.stop()
+    
     df = df_raw.copy()
     df['Load_Raw'] = df['Load']
     df['Utilization'] = df['Load'] / df['Capacity']
     df['Status'] = df['Utilization'].apply(lambda x: "⚠️ Potential Delay" if x > 0.95 else "✅ On Time")
+    
+    # Correctly call the global timing function
+    df['Arrival'] = [calculate_arrival_time(i, row['Load']) for i, row in df.iterrows()]
+    
     df['Load_Display'] = df['Load'].astype(str) + "/" + df['Capacity'].astype(str)
-    display_df = df[['Van', 'Stop', 'Load_Display', 'Status']].rename(columns={"Load_Display": "Load"})
+    display_df = df[['Van', 'Stop', 'Arrival', 'Load_Display', 'Status']].rename(columns={"Load_Display": "Load"})
     plot_df = df
 else:
     route_data = get_optimized_data(num_vans, max_load, total_parcels)
@@ -96,10 +102,10 @@ else:
     display_df = df[['Van', 'Stop', 'Arrival', 'Load', 'Status']]
     plot_df = df
 
-# --- 4. ENHANCED METRICS & SLA PERCENTAGE ---
+# --- 4. ENHANCED METRICS ---
 actual_load = int(plot_df['Load_Raw'].sum())
-fleet_capacity = len(plot_df) * max_load
-utilization_pct = (actual_load / fleet_capacity) * 100
+fleet_capacity = int(plot_df['Capacity'].sum())
+utilization_pct = (actual_load / fleet_capacity) * 100 if fleet_capacity > 0 else 0
 
 if utilization_pct > 95:
     sla_percentage = 100 - (utilization_pct - 85) * 2
