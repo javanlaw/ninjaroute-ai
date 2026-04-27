@@ -1,5 +1,5 @@
 streamlit
 pandas
 plotly
-ortools
-pytest
+requests
+pytz
