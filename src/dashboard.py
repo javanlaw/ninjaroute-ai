@@ -2,8 +2,20 @@ import streamlit as st
 import random
 import pandas as pd
 import plotly.express as px
+import requests  # Added for API functionality
 
 # --- 1. HELPER FUNCTIONS & ENGINE ---
+
+def fetch_api_data(api_url):
+    """Fetches delivery data from an external API endpoint."""
+    try:
+        response = requests.get(api_url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        return pd.DataFrame(data)
+    except Exception as e:
+        st.sidebar.error(f"API Error: {e}")
+        return None
 
 def calculate_arrival_time(index, van_load, risk_multiplier=1.0):
     """Calculates 12-hour format arrival time adjusted by environmental risk."""
@@ -69,10 +81,7 @@ st.set_page_config(page_title="Ninja Van Optimizer Pro", layout="wide")
 st.title("🚚 NinjaRoute AI: Smart Dispatcher")
 
 with st.sidebar:
-    st.header("📂 Data Integration")
-    uploaded_file = st.file_uploader("Upload Delivery Dataset (CSV)", type=["csv"])
-    
-    st.divider()
+    # --- 🌦️ ENVIRONMENTAL FACTORS (MOVED TO TOP) ---
     st.header("🌦️ Environmental Factors")
     weather = st.selectbox("Current Weather", ["Clear Skies", "Light Rain", "Heavy Rain/Flash Flood"])
     traffic = st.select_slider("Traffic Density", options=["Smooth", "Moderate", "Heavy Peak"])
@@ -84,37 +93,55 @@ with st.sidebar:
     if traffic == "Heavy Peak": risk_mult += 0.3
 
     st.divider()
+
+    # --- 📡 API LINK (MOVED TO MIDDLE) ---
+    st.header("🔗 Live Data Feed")
+    use_api = st.checkbox("Connect to Live API Feed")
+    api_endpoint = st.text_input("API URL", value="https://api.example.com/deliveries")
+    api_df = None
+    if use_api and st.button("Fetch Live Data"):
+        api_df = fetch_api_data(api_endpoint)
+
+    st.divider()
+
+    # --- 📂 DATA UPLOAD (MOVED TO BOTTOM) ---
+    st.header("📂 Manual Import")
+    uploaded_file = st.file_uploader("Upload Delivery Dataset (CSV)", type=["csv"])
+    
+    st.divider()
     st.header("Fleet Controls")
     num_vans = st.slider("Active Vans", 1, 10, 5)
     max_load = st.number_input("Max Parcels per Van", value=50)
     total_parcels_slider = st.slider("Total Volume (Manual)", 10, 500, 150)
     
-    optimize_upload = st.checkbox("Optimize Uploaded CSV Data", value=True)
+    optimize_data = st.checkbox("Optimize Incoming Data", value=True)
     st.button("🔄 Re-Optimize Fleet", use_container_width=True)
 
-# --- 3. EXECUTION LOGIC (Updated for Independence) ---
-if uploaded_file is not None:
-    df_raw = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-    df_raw.columns = df_raw.columns.str.strip().str.title()
-    
-    if 'Load' not in df_raw.columns:
-        st.error("❌ Column Mismatch: CSV must contain a 'Load' header.")
+# --- 3. EXECUTION LOGIC ---
+source_df = None
+if api_df is not None:
+    source_df = api_df
+    st.info("🌐 Source: Live API Feed")
+elif uploaded_file is not None:
+    source_df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
+    st.info("📁 Source: CSV File")
+
+if source_df is not None:
+    source_df.columns = source_df.columns.str.strip().str.title()
+    if 'Load' not in source_df.columns:
+        st.error("❌ Data Mismatch: Input must contain a 'Load' column.")
         st.stop()
     
-    # Use Volume from CSV, ignoring the Manual Slider
-    active_volume = int(df_raw['Load'].sum())
-    st.info(f"📁 Source: CSV File ({active_volume} Units)")
+    active_volume = int(source_df['Load'].sum())
 
-    if optimize_upload:
-        # Optimization logic applied to CSV data
+    if optimize_data:
         route_data = get_optimized_data(num_vans, max_load, active_volume, risk_mult)
         if not route_data:
-            st.error(f"❌ Infeasible: CSV Volume ({active_volume}) exceeds Fleet Capacity.")
+            st.error(f"❌ Infeasible: Volume ({active_volume}) exceeds Fleet Capacity.")
             st.stop()
         df = pd.DataFrame(route_data)
     else:
-        # Display CSV data exactly as is
-        df = df_raw.copy()
+        df = source_df.copy()
         df['Load_Raw'] = df['Load'].fillna(0).astype(int)
         if 'Van' not in df.columns: df['Van'] = [f"Van {i+1}" for i in range(len(df))]
         if 'Stop' not in df.columns: df['Stop'] = "Local Cluster"
@@ -122,13 +149,11 @@ if uploaded_file is not None:
         df['Fuel_Cost'] = [calculate_fuel_efficiency(row['Load_Raw'], 15 + (i*2), risk_mult) for i, row in df.iterrows()]
         df['Status'] = df['Load_Raw'].apply(lambda x: "⚠️ Potential Delay" if x/max_load > 0.90 or risk_mult > 1.3 else "✅ On Time")
 else:
-    # Source: Manual Slider
     active_volume = total_parcels_slider
     st.info(f"🤖 Source: Manual Simulation ({active_volume} Units)")
-    
     route_data = get_optimized_data(num_vans, max_load, active_volume, risk_mult)
     if not route_data:
-        st.error(f"❌ Infeasible: Increase Vans or Capacity to meet volume.")
+        st.error("❌ Infeasible: Increase Vans or Capacity.")
         st.stop()
     df = pd.DataFrame(route_data)
 
@@ -149,23 +174,28 @@ col3.metric("Fleet Est. Distance", f"{total_dist} km", delta="Weather Adjusted")
 st.subheader("📍 Singapore Cluster Dispatch Schedule")
 st.dataframe(display_df, use_container_width=True, hide_index=True)
 
+st.divider() 
 st.subheader("📊 Operational Analytics")
-tab1, tab2 = st.tabs(["Fuel vs Load", "SLA Status"])
 
-with tab1:
+chart_col1, chart_col2 = st.columns(2)
+
+with chart_col1:
+    st.write("### Fuel Consumption")
     fig_scatter = px.scatter(
         plot_df, x="Load_Raw", y="Fuel_Cost", size="Fuel_Cost", color="Status",
-        hover_name="Van", title="Fuel Consumption relative to Parcel Weight",
+        hover_name="Van", title="Fuel vs. Parcel Weight",
         labels={'Load_Raw': 'Parcels', 'Fuel_Cost': 'Fuel Cost (S$)'},
         color_discrete_map={"✅ On Time": "#2ecc71", "⚠️ Potential Delay": "#e74c3c"},
         template="plotly_white"
     )
     st.plotly_chart(fig_scatter, use_container_width=True)
 
-with tab2:
+with chart_col2:
+    st.write("### Fleet Load")
     fig_bar = px.bar(
         plot_df, x="Van", y="Load_Raw", color="Status",
         title="Fleet Load Distribution",
+        labels={'Load_Raw': 'Units', 'Van': 'Vehicle ID'},
         color_discrete_map={"✅ On Time": "#2ecc71", "⚠️ Potential Delay": "#e74c3c"}
     )
     st.plotly_chart(fig_bar, use_container_width=True)
