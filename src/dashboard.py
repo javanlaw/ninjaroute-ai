@@ -76,13 +76,16 @@ def calculate_fuel_efficiency(load, distance, risk_multiplier):
     return round(total_liters * 2.85, 2)
 
 def get_optimized_data(vans, capacity, total_parcels, risk_multiplier=1.0):
-    """Heuristic Engine to distribute load across a fleet."""
+    """Heuristic Engine to distribute load across a fleet with Regional Routing."""
     if (vans * capacity) < total_parcels:
         return []
 
-    sg_zones = [
-        "North-East (Punggol/Sengkang)", "West (Jurong/Clementi)", 
-        "Central (CBD/Orchard)", "East (Tampines/Changi)", "North (Woodlands/Yishun)"
+    ZONE_PLANS = [
+        {"name": "North-East (Punggol/Sengkang)", "sectors": "53-55, 82", "route": "HQ → Sengkang East → Punggol Central → Northshore"},
+        {"name": "West (Jurong/Clementi)", "sectors": "12, 60-64", "route": "HQ → Clementi Ave 6 → Jurong East St 21 → Tuas South"},
+        {"name": "Central (CBD/Orchard)", "sectors": "01-09, 22-23", "route": "HQ → Tanjong Pagar → Raffles Quay → Orchard Rd"},
+        {"name": "East (Tampines/Changi)", "sectors": "46-52, 81", "route": "HQ → Bedok South → Tampines Hub → Changi Cargo"},
+        {"name": "North (Woodlands/Yishun)", "sectors": "72-76", "route": "HQ → Mandai Rd → Woodlands Sq → Sembawang Dr"}
     ]
 
     results = []
@@ -94,125 +97,125 @@ def get_optimized_data(vans, capacity, total_parcels, risk_multiplier=1.0):
             ideal_share = total_parcels // vans
             van_load = random.randint(max(5, ideal_share - 5), min(capacity, ideal_share + 10))
             van_load = min(van_load, remaining_parcels - (vans - i - 1))
+        
         remaining_parcels -= van_load
+        zone_info = ZONE_PLANS[i % len(ZONE_PLANS)]
         dist = 15 + (i * 2) 
         fuel_cost = calculate_fuel_efficiency(van_load, dist, risk_multiplier)
+        
         results.append({
             "Van": f"Ninja Van {i + 1:02d}",
-            "Stop": sg_zones[i % len(sg_zones)],
+            "Stop": zone_info["name"],
+            "Sectors": zone_info["sectors"],
+            "Planned_Route": zone_info["route"],
             "Arrival": calculate_arrival_time(i, van_load, risk_multiplier), 
-            "Load_Raw": van_load, "Capacity": capacity, "Fuel_Cost": fuel_cost,
+            "Load_Raw": van_load, 
+            "Capacity": capacity, 
+            "Fuel_Cost": fuel_cost,
             "Status": "⚠️ Potential Delay" if (van_load / capacity) > 0.90 or risk_multiplier > 1.3 else "✅ On Time"
         })
     return results
 
-# --- 2. UI LAYOUT ---
-st.set_page_config(page_title="Ninja Van Optimizer Pro", layout="wide")
-st.title("🚚 NinjaRoute AI: Smart Dispatcher")
+# --- 2. UI LAYOUT & CONTROL TOWER ---
+st.set_page_config(page_title="NinjaRoute | Operational Control Tower", layout="wide")
 
-# Initialize session state for environmental sync
+st.title("🛡️ NinjaRoute AI: Command & Control Center")
+
 if 'live_weather' not in st.session_state:
     st.session_state.live_weather = fetch_sg_weather()
 if 'live_traffic' not in st.session_state:
     st.session_state.live_traffic = get_simulated_live_traffic()
 
-with st.sidebar:
-    st.header("🌦️ Environmental Factors")
-    
-    if st.button("🔄 Sync Live SG Environment"):
+t1, t2, t3, t4 = st.columns([2, 1, 1, 1])
+with t1:
+    st.caption("SYSTEM STATUS: ONLINE")
+    st.write(f"**Last Telemetry Sync:** {datetime.now().strftime('%H:%M:%S')} SGT")
+with t2:
+    st.metric("LIVE WEATHER", st.session_state.live_weather)
+with t3:
+    st.metric("TRAFFIC DENSITY", st.session_state.live_traffic)
+with t4:
+    if st.button("🔄 Sync Telemetry", use_container_width=True):
         st.session_state.live_weather = fetch_sg_weather()
         st.session_state.live_traffic = get_simulated_live_traffic()
-        st.success("Synced to Live SGT")
+        st.rerun()
 
-    st.markdown(f"""
-    <div style="background-color:#f0f2f6; padding:10px; border-radius:10px; margin-bottom:10px;">
-        <p style="margin:0; font-size:12px; color:#5f6368;">LIVE WEATHER</p>
-        <p style="margin:0; font-size:18px; font-weight:bold;">{st.session_state.live_weather}</p>
-        <p style="margin:0; font-size:12px; color:#5f6368; margin-top:10px;">TRAFFIC DENSITY</p>
-        <p style="margin:0; font-size:18px; font-weight:bold;">{st.session_state.live_traffic}</p>
-    </div>
-    """, unsafe_allow_html=True)
+st.divider()
+
+with st.sidebar:
+    st.header("⚙️ Mission Parameters")
     
+    with st.expander("📡 Data Feed", expanded=True):
+        use_api = st.checkbox("Connect to Live API Feed")
+        api_endpoint = st.text_input("API URL", value="https://api.example.com/deliveries")
+        uploaded_file = st.file_uploader("Upload Delivery Dataset (CSV)", type=["csv"])
+
+    st.divider()
+    st.header("Fleet Controls")
+    num_vans = st.slider("Active Vans", 1, 10, 6)
+    max_load = st.number_input("Max Parcels per Van", value=50)
+    total_parcels_slider = st.slider("Total Volume (Manual)", 10, 500, 200)
+    
+    st.button("🔄 Re-Optimize Fleet", use_container_width=True, type="primary")
+
     risk_mult = 1.0
     if st.session_state.live_weather == "Light Rain": risk_mult += 0.2
     elif st.session_state.live_weather == "Heavy Rain/Flash Flood": risk_mult += 0.5
-    
     if st.session_state.live_traffic == "Moderate": risk_mult += 0.1
     elif st.session_state.live_traffic == "Heavy Peak": risk_mult += 0.3
 
-    st.divider()
-    st.header("🔗 Live Data Feed")
-    use_api = st.checkbox("Connect to Live API Feed")
-    api_endpoint = st.text_input("API URL", value="https://api.example.com/deliveries")
-    api_df = None
-    if use_api and st.button("Fetch Live Data"):
-        api_df = fetch_api_data(api_endpoint)
-
-    st.divider()
-    st.header("📂 Manual Import")
-    uploaded_file = st.file_uploader("Upload Delivery Dataset (CSV)", type=["csv"])
-    
-    st.divider()
-    st.header("Fleet Controls")
-    num_vans = st.slider("Active Vans", 1, 10, 5)
-    max_load = st.number_input("Max Parcels per Van", value=50)
-    total_parcels_slider = st.slider("Total Volume (Manual)", 10, 500, 150)
-    
-    optimize_data = st.checkbox("Optimize Incoming Data", value=True)
-    st.button("🔄 Re-Optimize Fleet", use_container_width=True)
-
 # --- 3. EXECUTION LOGIC ---
-source_df = None
-if api_df is not None:
-    source_df = api_df
-    st.info("🌐 Source: Live API Feed")
-elif uploaded_file is not None:
-    source_df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-    st.info("📁 Source: CSV File")
+api_df = fetch_api_data(api_endpoint) if use_api else None
+source_df = api_df if api_df is not None else (pd.read_csv(uploaded_file, encoding='utf-8-sig') if uploaded_file else None)
 
 if source_df is not None:
     source_df.columns = source_df.columns.str.strip().str.title()
-    if 'Load' not in source_df.columns:
-        st.error("❌ Data Mismatch: Input must contain a 'Load' column.")
-        st.stop()
-    active_volume = int(source_df['Load'].sum())
+    active_volume = int(source_df['Load'].sum()) if 'Load' in source_df.columns else total_parcels_slider
 else:
     active_volume = total_parcels_slider
-    st.info(f"🤖 Source: Manual Simulation ({active_volume} Units)")
 
 route_data = get_optimized_data(num_vans, max_load, active_volume, risk_mult)
 
 if not route_data:
-    current_capacity = num_vans * max_load
-    st.error(f"""
-        ❌ **Fleet Capacity Exceeded**
-        * Total Volume: {active_volume} units
-        * Current Capacity: {current_capacity} units ({num_vans} vans × {max_load} cap)
-        * **Shortfall: {active_volume - current_capacity} units**
-    """)
+    st.error(f"🚨 **ALERT: FLEET CAPACITY EXCEEDED!** Shortfall: {active_volume - (num_vans * max_load)} units")
     st.stop()
 
 df = pd.DataFrame(route_data)
-display_df = df[['Van', 'Stop', 'Arrival', 'Load_Raw', 'Fuel_Cost', 'Status']].rename(columns={"Load_Raw": "Load (Units)"})
 
 # --- 4. ENHANCED METRICS ---
-actual_load = int(df['Load_Raw'].sum())
-total_fuel = round(df['Fuel_Cost'].sum(), 2)
-total_dist = 15 + (len(df) * 12)
-
 col1, col2, col3 = st.columns(3)
-col1.metric("Est. Total Fuel Cost", f"S${total_fuel}", delta=f"{risk_mult}x Risk Factor", delta_color="inverse")
-col2.metric("Total Dispatch Volume", f"{actual_load} Units")
-col3.metric("Fleet Est. Distance", f"{total_dist} km")
+col1.metric("Est. Total Fuel Cost", f"S${df['Fuel_Cost'].sum():.2f}", delta=f"{risk_mult}x Risk")
+col2.metric("Total Dispatch Volume", f"{int(df['Load_Raw'].sum())} Units")
+col3.metric("Fleet Est. Distance", f"{15 + (len(df) * 12)} km")
 
 # --- 5. TABLE & CHART ---
 st.subheader("📍 Singapore Cluster Dispatch Schedule")
-st.dataframe(display_df, use_container_width=True, hide_index=True)
+display_df = df[['Van', 'Stop', 'Sectors', 'Planned_Route', 'Arrival', 'Load_Raw', 'Status']].rename(
+    columns={"Load_Raw": "Load (Units)", "Planned_Route": "Route Plan"}
+)
+
+# UPDATED: Using data_editor with column_config to prevent "Potential Delay" truncation
+st.data_editor(
+    display_df,
+    use_container_width=True,
+    hide_index=True,
+    disabled=True,
+    column_config={
+        "Status": st.column_config.Column(
+            "Status",
+            width="medium",
+            help="Real-time delivery status"
+        ),
+        "Route Plan": st.column_config.Column(
+            "Route Plan",
+            width="large"
+        )
+    }
+)
 
 st.divider() 
 st.subheader("📊 Operational Analytics")
 
-# FIXED: Removed illegal indentation here
 chart_col1, chart_col2 = st.columns(2)
 with chart_col1:
     fig_scatter = px.scatter(df, 
@@ -220,7 +223,7 @@ with chart_col1:
                              y="Fuel_Cost", 
                              size="Fuel_Cost", 
                              color="Status",
-                             text="Van",
+                             text="Van", 
                              title="Fuel Consumption vs Payload (by Vehicle)", 
                              template="plotly_white",
                              labels={"Load_Raw": "Units", "Fuel_Cost": "Cost (S$)"},
