@@ -124,7 +124,6 @@ with st.sidebar:
         st.session_state.live_traffic = get_simulated_live_traffic()
         st.success("Synced to Live SGT")
 
-    # Display Status (Manual Overrides Removed)
     st.markdown(f"""
     <div style="background-color:#f0f2f6; padding:10px; border-radius:10px; margin-bottom:10px;">
         <p style="margin:0; font-size:12px; color:#5f6368;">LIVE WEATHER</p>
@@ -134,7 +133,6 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     
-    # Calculate Risk Multiplier Silently from Live Data
     risk_mult = 1.0
     if st.session_state.live_weather == "Light Rain": risk_mult += 0.2
     elif st.session_state.live_weather == "Heavy Rain/Flash Flood": risk_mult += 0.5
@@ -213,15 +211,26 @@ st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 st.divider() 
 st.subheader("📊 Operational Analytics")
-chart_col1, chart_col2 = st.columns(2)
 
+# FIXED: Removed illegal indentation here
+chart_col1, chart_col2 = st.columns(2)
 with chart_col1:
-    fig_scatter = px.scatter(df, x="Load_Raw", y="Fuel_Cost", size="Fuel_Cost", color="Status",
-                             title="Fuel vs. Parcel Weight", template="plotly_white",
+    fig_scatter = px.scatter(df, 
+                             x="Load_Raw", 
+                             y="Fuel_Cost", 
+                             size="Fuel_Cost", 
+                             color="Status",
+                             text="Van",
+                             title="Fuel Consumption vs Payload (by Vehicle)", 
+                             template="plotly_white",
+                             labels={"Load_Raw": "Units", "Fuel_Cost": "Cost (S$)"},
                              color_discrete_map={"✅ On Time": "#2ecc71", "⚠️ Potential Delay": "#e74c3c"})
+    
+    fig_scatter.update_traces(textposition='top center')
     st.plotly_chart(fig_scatter, use_container_width=True)
 
 with chart_col2:
-    fig_bar = px.bar(df, x="Van", y="Load_Raw", color="Status", title="Fleet Load Distribution",
+    fig_bar = px.bar(df, x="Van", y="Load_Raw", color="Status", title="Fleet Resource Distribution",
+                     labels={"Load_Raw": "Units"},
                      color_discrete_map={"✅ On Time": "#2ecc71", "⚠️ Potential Delay": "#e74c3c"})
     st.plotly_chart(fig_bar, use_container_width=True)
